@@ -8,11 +8,12 @@ use std::sync::Arc;
 use async_channel::{Receiver, Sender};
 use embassy_futures::select::{Either, select};
 use oikade_adapter_api::{
-    CommandRequest as WireCommandRequest, CommandResponse, Envelope, EventRequest, FrameKind,
-    Hello, InitializeRequest, METHOD_COMMAND, METHOD_EVENT, METHOD_HEALTH, METHOD_HELLO,
-    METHOD_INITIALIZE, METHOD_OPEN_COMMISSIONING_WINDOW, METHOD_REMOVE_RESOURCE, METHOD_SHUTDOWN,
-    METHOD_SYNC, OpenCommissioningWindowRequest, ProtocolError, RemoveResourceRequest, SyncRequest,
-    VERSION, Value as WireValue, decode_body, encode_body,
+    CommandRequest as WireCommandRequest, CommandResponse, CommissioningInfoRequest, Envelope,
+    EventRequest, FrameKind, Hello, InitializeRequest, METHOD_COMMAND, METHOD_COMMISSIONING_INFO,
+    METHOD_EVENT, METHOD_HEALTH, METHOD_HELLO, METHOD_INITIALIZE, METHOD_OPEN_COMMISSIONING_WINDOW,
+    METHOD_REMOVE_RESOURCE, METHOD_SHUTDOWN, METHOD_SYNC, OpenCommissioningWindowRequest,
+    ProtocolError, RemoveResourceRequest, SyncRequest, VERSION, Value as WireValue, decode_body,
+    encode_body,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -51,6 +52,9 @@ pub enum RuntimeRequest {
     },
     OpenCommissioningWindow {
         duration_seconds: u16,
+        response: Sender<Result<JsonValue, RpcFailure>>,
+    },
+    CommissioningInfo {
         response: Sender<Result<JsonValue, RpcFailure>>,
     },
     RemoveResource {
@@ -265,6 +269,13 @@ async fn handle_request(
             })
             .await
         }
+        METHOD_COMMISSIONING_INFO => {
+            let _: CommissioningInfoRequest = request_body(body)?;
+            runtime_round_trip(runtime, |response| RuntimeRequest::CommissioningInfo {
+                response,
+            })
+            .await
+        }
         METHOD_REMOVE_RESOURCE => {
             let request: RemoveResourceRequest = request_body(body)?;
             if request.resource_type.is_empty() || request.id.is_empty() {
@@ -405,5 +416,40 @@ mod tests {
         assert_eq!(metadata.adapter_id, "oikade.matter");
         assert_eq!(metadata.min_api_version, VERSION);
         assert_eq!(metadata.max_api_version, VERSION);
+    }
+
+    #[test]
+    fn commissioning_info_forwards_a_read_only_runtime_request() {
+        futures_lite::future::block_on(async {
+            let root = tempfile::tempdir().expect("temporary directory");
+            let mut builder = ProjectionBuilder::new(root.path());
+            let state = Arc::new(BridgeState::new(async_channel::bounded(1).0));
+            let (runtime_tx, runtime_rx) = async_channel::bounded(1);
+            let body = serde_json::value::to_raw_value(&CommissioningInfoRequest {})
+                .expect("request should encode");
+
+            let request = handle_request(
+                METHOD_COMMISSIONING_INFO,
+                Some(&body),
+                &mut builder,
+                &runtime_tx,
+                &state,
+            );
+            let response = async {
+                match runtime_rx.recv().await.expect("runtime request") {
+                    RuntimeRequest::CommissioningInfo { response } => response
+                        .send(Ok(json!({"open": false})))
+                        .await
+                        .expect("response should be delivered"),
+                    _ => panic!("commissioning info must not request a window open"),
+                }
+            };
+            let (result, ()) = embassy_futures::join::join(request, response).await;
+
+            assert_eq!(
+                result.expect("request should succeed"),
+                json!({"open": false})
+            );
+        });
     }
 }

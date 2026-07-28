@@ -217,13 +217,42 @@ async fn adapters(client: &Client, args: &[String]) -> Result<()> {
             let window = client
                 .open_commissioning_window(&operands[0], seconds)
                 .await?;
-            println!(
-                "Commissioning window opened on adapter {} for {}s.",
-                operands[0], window.duration_seconds
-            );
+            if let Some(remaining) = window.remaining_seconds {
+                println!(
+                    "Commissioning window on adapter {} is available ({}s remaining).",
+                    operands[0], remaining
+                );
+            } else {
+                println!(
+                    "Commissioning window on adapter {} is available.",
+                    operands[0]
+                );
+            }
             println!("Manual code: {}", window.manual_code);
             println!("QR payload: {}", window.qr_code);
             println!("Keep these onboarding payloads private.");
+            Ok(())
+        }
+        "commissioning-info" => {
+            require_operands(&args[1..], 1, "adapters commissioning-info")?;
+            let info = client.commissioning_info(&args[1]).await?;
+            if info.open {
+                if let Some(remaining) = info.remaining_seconds {
+                    println!(
+                        "Commissioning window on adapter {} is open ({}s remaining).",
+                        args[1], remaining
+                    );
+                } else {
+                    println!("Commissioning window on adapter {} is open.", args[1]);
+                }
+                if let (Some(manual_code), Some(qr_code)) = (info.manual_code, info.qr_code) {
+                    println!("Manual code: {manual_code}");
+                    println!("QR payload: {qr_code}");
+                    println!("Keep these onboarding payloads private.");
+                }
+            } else {
+                println!("Commissioning window on adapter {} is closed.", args[1]);
+            }
             Ok(())
         }
         "reset" => {
@@ -553,7 +582,7 @@ fn print_plugins_help() -> Result<()> {
 
 fn print_adapters_help() -> Result<()> {
     println!(
-        "Usage:\n  oikade adapters list [options]\n  oikade adapters inspect [options] <instance>\n  oikade adapters open-commissioning-window [--duration 15m] [options] <instance>\n  oikade adapters reset --confirm <instance> [options] <instance>\n  oikade adapters remove-resource --confirm [options] <instance> <type> <id>"
+        "Usage:\n  oikade adapters list [options]\n  oikade adapters inspect [options] <instance>\n  oikade adapters commissioning-info [options] <instance>\n  oikade adapters open-commissioning-window [--duration 15m] [options] <instance>\n  oikade adapters reset --confirm <instance> [options] <instance>\n  oikade adapters remove-resource --confirm [options] <instance> <type> <id>"
     );
     Ok(())
 }

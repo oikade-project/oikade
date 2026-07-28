@@ -55,11 +55,16 @@ The configured Matter setup passcode is passed only in the sidecar's explicitly
 constructed environment, never in its command line or ordinary initialization
 frame. The sidecar validates it without logging it.
 
-Manual and QR onboarding payloads are generated only for an explicit local
-commissioning-window request and returned directly to that caller. They are not
-stored in adapter status or canonical state. Admin responses carry
+Manual and QR onboarding payloads are returned only through an explicit local
+commissioning-info or commissioning-window request while the window is active.
+They are not stored in adapter status or canonical state. Fresh state emits a
+concise automatic-window milestone with duration, never its pairing data.
+Admin responses carry
 `Cache-Control: no-store`; neither the daemon nor sidecar logs the successful
 response body.
+The pinned mDNS backend cannot acknowledge its first published advertisement,
+so automatic commissioning also emits one warning identifying that readiness
+limitation without including onboarding data.
 
 This design reduces accidental exposure but does not make process listings,
 debuggers or a compromised same-user process harmless. Filesystem permissions,

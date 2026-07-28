@@ -16,6 +16,34 @@ commissioning, fabric, subscription and genuine failure records. Use `debug`
 only when packet/exchange diagnostics are needed; expected Apple optional-
 cluster probes and late acknowledgements are suppressed at normal levels.
 
+Matter is disabled by default. Configure a unique eight-digit setup passcode
+before enabling it. After loading state, the adapter opens one 15-minute basic
+commissioning window when no fabrics exist. Every process start makes this
+decision from the loaded fabric table, so restarting an uncommissioned adapter
+opens a fresh window; a restart with any fabric does not. Use the local CLI to
+inspect the current window or explicitly open another one:
+
+```sh
+oikade adapters commissioning-info matter
+oikade adapters open-commissioning-window --duration 10m matter
+```
+
+Pairing payloads are returned only by explicit direct local admin responses,
+through either the CLI or local API. They never appear in logs, health checks,
+or passive status output.
+
+An explicit open request is idempotent while an Oikade-owned window is active:
+it returns the current payload and remaining time without extending the window.
+A controller-owned window produces a conflict without exposing credentials. If
+an Oikade window has expired but rs-matter has not completed its periodic
+cleanup, retry after the adapter reports it closed.
+
+The adapter binds Matter UDP before opening automatically. Opening notifies the
+mDNS backend to refresh its services, but rs-matter 0.2.0 does not expose a
+reliable acknowledgement for the first published advertisement. A one-time
+warning records that limitation; commissioning remains available for the full
+bounded window even if discovery initialization is delayed.
+
 The current projection supports switches, dimmable lights, outlets,
 temperature, relative humidity, contact and occupancy sensors. It does not
 require Docker or an external native SDK toolchain.

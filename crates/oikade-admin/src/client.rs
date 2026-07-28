@@ -10,8 +10,9 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::wire::{
     Adapter, AdapterReset, AdapterResource, AdapterResourcesResponse, AdaptersResponse, Capability,
-    CommissioningRequest, CommissioningWindow, Device, DevicesResponse, ErrorPayload, Event,
-    Plugin, PluginsResponse, ResetRequest, Status, StreamRecord, Value, WriteRequest,
+    CommissioningInfo, CommissioningRequest, CommissioningWindow, Device, DevicesResponse,
+    ErrorPayload, Event, Plugin, PluginsResponse, ResetRequest, Status, StreamRecord, Value,
+    WriteRequest,
 };
 
 const UNARY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -156,6 +157,18 @@ impl Client {
             Method::POST,
             &format!("/v1/adapters/{}/commissioning-window", segment(instance)),
             Some(&CommissioningRequest { duration_seconds }),
+        )
+        .await
+    }
+
+    pub async fn commissioning_info(
+        &self,
+        instance: &str,
+    ) -> Result<CommissioningInfo, ClientError> {
+        self.unary(
+            Method::GET,
+            &format!("/v1/adapters/{}/commissioning-window", segment(instance)),
+            None::<&()>,
         )
         .await
     }

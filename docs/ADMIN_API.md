@@ -39,6 +39,7 @@ oikade plugins list --state-dir /var/lib/oikade
 oikade plugins inspect --state-dir /var/lib/oikade garden-weather
 oikade adapters list --state-dir /var/lib/oikade
 oikade adapters inspect --state-dir /var/lib/oikade matter
+oikade adapters commissioning-info --state-dir /var/lib/oikade matter
 ```
 
 Values are parsed according to the capability's declared kind. Booleans accept
@@ -55,6 +56,7 @@ forms; strings use the supplied argument verbatim.
 | `GET` | `/v1/plugins/{instance}` | Manifest, process, restart and device details for one instance. |
 | `GET` | `/v1/adapters` | Configured protocol adapters and supervision state. |
 | `GET` | `/v1/adapters/{instance}` | Process, health, synchronization and projection diagnostics for one adapter. |
+| `GET` | `/v1/adapters/{instance}/commissioning-window` | Inspect current commissioning status and retrieve active onboarding payloads. |
 | `POST` | `/v1/adapters/{instance}/commissioning-window` | Explicitly request bounded onboarding payloads. |
 | `POST` | `/v1/adapters/{instance}/reset` | Reset only the selected adapter's private protocol state. |
 | `DELETE` | `/v1/adapters/{instance}/resources/{type}/{id}` | Remove one supported protocol-owned resource. |
@@ -97,16 +99,31 @@ The Matter sidecar currently reports each commissioned fabric with its local
 index, label, vendor ID, fabric ID, node ID and compressed fabric ID. Setup
 codes and operational credentials are never included in status or inventory.
 
+Fresh Matter state automatically opens one 15-minute window when no fabrics
+exist. `GET /v1/adapters/{instance}/commissioning-window` reports whether it is
+open and returns timing and onboarding payloads only while Oikade owns an active
+window. The request never changes commissioning state. The CLI equivalent is:
+
+```sh
+oikade adapters commissioning-info matter
+```
+
 `POST /v1/adapters/{instance}/commissioning-window` accepts a
-`duration_seconds` from 180 through 900. It opens or safely renews the selected
-adapter's commissioning window and returns the Matter manual code and QR
-payload to that explicit caller. These secret-bearing values use a `no-store`
-response and are not retained in adapter status or written to Oikade logs. The
-CLI command is:
+`duration_seconds` from 180 through 900. It opens a window and returns its
+original duration, remaining time, Matter manual code and QR payload to that
+explicit caller. If an Oikade-owned window is already active, the operation is
+idempotent: it returns that window without extending it. A controller-owned
+window returns `window_conflict` without payloads. An expired Oikade window
+that rs-matter is still closing returns the retryable `window_closing` error.
+These secret-bearing values use a `no-store` response and are not retained in
+adapter status or written to Oikade logs. The CLI command is:
 
 ```sh
 oikade adapters open-commissioning-window --duration 10m matter
 ```
+
+Each process start with zero fabrics opens a fresh automatic window. Restarts
+with any existing fabric do not open it.
 
 `DELETE /v1/adapters/{instance}/resources/{type}/{id}` removes one explicitly
 selected protocol resource and returns the complete remaining inventory. The

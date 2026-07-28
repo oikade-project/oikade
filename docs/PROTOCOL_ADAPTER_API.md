@@ -125,9 +125,30 @@ intentionally outside the adapter RPC.
 The optional `open_commissioning_window` request contains only a bounded
 duration from 180 through 900 seconds. The Matter adapter uses its already
 configured commissionable data, performs the operation on the Matter event
-loop and returns manual and QR onboarding payloads only in the direct response.
-The host validates but never stores or logs those payloads. An existing idle
-window can be renewed; an active PASE exchange is never interrupted.
+loop and returns original duration, positive remaining time, and manual and QR
+onboarding payloads only in the direct response. The host validates but never
+stores or logs those payloads. Repeating the request while an Oikade-owned
+window is active returns that window without extending or reopening it. An
+untracked window fails with `window_conflict`; an expired tracked window that
+the SDK still reports open fails with retryable `window_closing`. Neither path
+interrupts an active PASE exchange or discloses payloads.
+
+The additive `commissioning_info` request has an empty body and never changes
+window state. Its response reports open/closed status and, when known, original
+and remaining duration. Manual and QR payloads are optional and may appear only
+with complete, positive timing for an active window opened by that adapter. An
+open window without timing or payloads is untracked or awaiting SDK cleanup.
+Hosts must reject partial detail sets and must not retain or log payloads.
+
+The Matter adapter opens one 15-minute basic window after loading state only
+when its fabric table is empty. This decision is made on every process start,
+so restarting without a fabric opens a fresh window. Explicit opening remains
+available for later onboarding and multi-admin use.
+
+The adapter binds Matter UDP before automatic opening, and opening triggers the
+SDK's mDNS service-change notification. The pinned SDK has no reliable signal
+confirming that the first advertisement was published, so startup records one
+bounded warning rather than blocking adapter readiness.
 
 A full adapter reset is deliberately a host lifecycle operation rather than an
 adapter RPC. The host first stops the sidecar so no native code retains open

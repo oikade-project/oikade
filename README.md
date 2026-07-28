@@ -54,6 +54,11 @@ commissioning data. Local single-fabric removal remains fail-closed because
 `rs-matter` 0.2.0 does not expose safe live session expiry; controller-driven
 fabric removal remains available. Matter stays experimental and disabled by
 default while M3 completes interoperability, multi-admin and soak validation.
+Enable it explicitly with a unique eight-digit setup passcode. On each process
+start with no fabrics, the adapter opens one 15-minute commissioning window
+automatically. Retrieve its private pairing payload with
+`oikade adapters commissioning-info matter`; normal restarts with an existing
+fabric do not reopen commissioning.
 
 ## Project documentation
 

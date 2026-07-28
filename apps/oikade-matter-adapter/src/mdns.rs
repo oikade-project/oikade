@@ -41,13 +41,7 @@ pub async fn run<C: Crypto + Copy>(matter: &Matter<'_>, _crypto: C) -> Result<()
 
 #[cfg(not(target_os = "macos"))]
 async fn run_builtin<C: Crypto>(matter: &Matter<'_>, crypto: C) -> Result<(), Error> {
-    let (ipv4, ipv6, interface) = match initialize_network() {
-        Ok(network) => network,
-        Err(error) => {
-            log::warn!("mDNS is unavailable: {error}");
-            return core::future::pending().await;
-        }
-    };
+    let (ipv4, ipv6, interface) = initialize_network()?;
 
     let socket = Socket::new(Domain::IPV6, Type::DGRAM, Some(Protocol::UDP))?;
     socket.set_reuse_address(true)?;
@@ -83,6 +77,11 @@ async fn run_builtin<C: Crypto>(matter: &Matter<'_>, crypto: C) -> Result<(), Er
 #[cfg(not(target_os = "macos"))]
 fn initialize_network() -> Result<(Ipv4Addr, Ipv6Addr, u32), Error> {
     let interfaces = if_addrs::get_if_addrs().map_err(|_| ErrorCode::StdIoError)?;
+    select_network(&interfaces).ok_or_else(|| ErrorCode::NoNetworkInterface.into())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn select_network(interfaces: &[if_addrs::Interface]) -> Option<(Ipv4Addr, Ipv6Addr, u32)> {
     let find = |filter: fn(std::net::Ipv6Addr) -> bool| {
         interfaces
             .iter()
@@ -122,5 +121,72 @@ fn initialize_network() -> Result<(Ipv4Addr, Ipv6Addr, u32), Error> {
                 })
         })
         .map(|(ipv4, ipv6, index)| (ipv4.octets().into(), ipv6.octets().into(), index))
-        .ok_or_else(|| ErrorCode::NoNetworkInterface.into())
+}
+
+#[cfg(all(test, not(target_os = "macos")))]
+mod tests {
+    use std::net::{Ipv4Addr as StdIpv4Addr, Ipv6Addr as StdIpv6Addr};
+
+    use if_addrs::{IfAddr, IfOperStatus, Ifv4Addr, Ifv6Addr, Interface};
+
+    use super::select_network;
+
+    fn interface(name: &str, addr: IfAddr, index: u32) -> Interface {
+        Interface {
+            name: name.to_owned(),
+            addr,
+            index: Some(index),
+            oper_status: IfOperStatus::Up,
+            is_p2p: false,
+        }
+    }
+
+    #[test]
+    fn network_selection_requires_a_non_loopback_ipv4_interface() {
+        assert_eq!(select_network(&[]), None);
+
+        let interfaces = [interface(
+            "loopback",
+            IfAddr::V4(Ifv4Addr {
+                ip: StdIpv4Addr::LOCALHOST,
+                netmask: StdIpv4Addr::new(255, 0, 0, 0),
+                prefixlen: 8,
+                broadcast: None,
+            }),
+            1,
+        )];
+        assert_eq!(select_network(&interfaces), None);
+    }
+
+    #[test]
+    fn network_selection_pairs_ipv4_with_link_local_ipv6() {
+        let ipv6 = StdIpv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0x10);
+        let interfaces = [
+            interface(
+                "eth0",
+                IfAddr::V4(Ifv4Addr {
+                    ip: StdIpv4Addr::new(192, 0, 2, 10),
+                    netmask: StdIpv4Addr::new(255, 255, 255, 0),
+                    prefixlen: 24,
+                    broadcast: Some(StdIpv4Addr::new(192, 0, 2, 255)),
+                }),
+                7,
+            ),
+            interface(
+                "eth0",
+                IfAddr::V6(Ifv6Addr {
+                    ip: ipv6,
+                    netmask: StdIpv6Addr::new(0xffff, 0xffff, 0xffff, 0xffff, 0, 0, 0, 0),
+                    prefixlen: 64,
+                    broadcast: None,
+                }),
+                7,
+            ),
+        ];
+
+        assert_eq!(
+            select_network(&interfaces),
+            Some(([192, 0, 2, 10].into(), ipv6.octets().into(), 7))
+        );
+    }
 }

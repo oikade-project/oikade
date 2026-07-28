@@ -23,11 +23,13 @@ use tokio::{net::UnixStream, sync::Mutex};
 
 use crate::{
     projection::{ProjectionKeys, RuntimeCommandHandler},
-    session::Session,
+    session::{Session, SessionError},
     state::{StateError, ensure_state_directory, reset_state_directory},
 };
 
 mod output;
+#[cfg(test)]
+mod tests;
 mod worker;
 
 use output::emit_adapter_output;
@@ -42,6 +44,8 @@ const MAX_DIAGNOSTICS: usize = 256;
 const MAX_DIAGNOSTIC_MESSAGE: usize = 1024;
 const MAX_RESOURCES: usize = 256;
 const MAX_RESOURCE_ATTRIBUTES: usize = 32;
+const WINDOW_CONFLICT_MESSAGE: &str = "a commissioning window is already active";
+const WINDOW_CLOSING_MESSAGE: &str = "the previous commissioning window is still closing";
 
 #[derive(Debug, Clone)]
 pub struct InstanceSpec {
@@ -125,6 +129,25 @@ pub enum InstanceError {
     Supervisor(#[from] oikade_supervisor::SupervisorError),
     #[error("adapter operation: {0}")]
     Operation(String),
+    #[error("adapter protocol error {code}: {message}")]
+    AdapterProtocol { code: String, message: String },
+}
+
+impl InstanceError {
+    pub fn protocol_error(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::AdapterProtocol { code, .. } => public_protocol_error(code),
+            _ => None,
+        }
+    }
+}
+
+fn public_protocol_error(code: &str) -> Option<(&'static str, &'static str)> {
+    match code {
+        "window_conflict" => Some(("window_conflict", WINDOW_CONFLICT_MESSAGE)),
+        "window_closing" => Some(("window_closing", WINDOW_CLOSING_MESSAGE)),
+        _ => None,
+    }
 }
 
 struct RunState {
@@ -374,8 +397,31 @@ impl Instance {
                 self.inner.spec.request_timeout,
             )
             .await
-            .map_err(|error| InstanceError::Operation(error.to_string()))?;
-        validate_commissioning_response(&response, seconds)?;
+            .map_err(map_session_error)?;
+        validate_commissioning_response(&response)?;
+        Ok(response)
+    }
+
+    pub async fn commissioning_info(
+        &self,
+    ) -> Result<api::CommissioningInfoResponse, InstanceError> {
+        let run = self
+            .inner
+            .active
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| InstanceError::Operation("adapter is not running".to_owned()))?;
+        let response: api::CommissioningInfoResponse = run
+            .session
+            .call(
+                api::METHOD_COMMISSIONING_INFO,
+                &api::CommissioningInfoRequest {},
+                self.inner.spec.request_timeout,
+            )
+            .await
+            .map_err(map_session_error)?;
+        validate_commissioning_info_response(&response)?;
         Ok(response)
     }
 
@@ -409,7 +455,7 @@ impl Instance {
                 self.inner.spec.request_timeout,
             )
             .await
-            .map_err(|error| InstanceError::Operation(error.to_string()))?;
+            .map_err(map_session_error)?;
         let resources = validate_resources(response.resources)?;
         run.state.lock().await.resources = resources.clone();
         Ok(resources)
@@ -564,6 +610,21 @@ fn valid_environment_key(key: &OsStr) -> bool {
     })
 }
 
+fn map_session_error(error: SessionError) -> InstanceError {
+    match error {
+        SessionError::Protocol { code, .. } => match public_protocol_error(&code) {
+            Some((code, message)) => InstanceError::AdapterProtocol {
+                code: code.to_owned(),
+                message: message.to_owned(),
+            },
+            None => InstanceError::Operation(
+                "adapter returned an unsupported protocol error".to_owned(),
+            ),
+        },
+        other => InstanceError::Operation(other.to_string()),
+    }
+}
+
 fn validate_diagnostics(
     diagnostics: Vec<api::Diagnostic>,
 ) -> Result<Vec<api::Diagnostic>, BoxError> {
@@ -622,23 +683,58 @@ fn validate_resources(
 
 fn validate_commissioning_response(
     response: &api::OpenCommissioningWindowResponse,
-    expected: u16,
 ) -> Result<(), InstanceError> {
-    if response.duration_seconds != expected
-        || !matches!(response.manual_code.len(), 11 | 21)
-        || !response
-            .manual_code
-            .bytes()
-            .all(|byte| byte.is_ascii_digit())
-        || !response.qr_code.starts_with("MT:")
-        || !(4..=512).contains(&response.qr_code.len())
-        || response.qr_code != response.qr_code.trim()
+    if !(api::MINIMUM_COMMISSIONING_WINDOW_SECONDS..=api::MAXIMUM_COMMISSIONING_WINDOW_SECONDS)
+        .contains(&response.duration_seconds)
+        || !matches!(response.remaining_seconds, Some(remaining) if (1..=response.duration_seconds).contains(&remaining))
+        || !valid_pairing_payload(&response.manual_code, &response.qr_code)
     {
         return Err(InstanceError::Operation(
             "adapter returned invalid commissioning data".to_owned(),
         ));
     }
     Ok(())
+}
+
+fn validate_commissioning_info_response(
+    response: &api::CommissioningInfoResponse,
+) -> Result<(), InstanceError> {
+    let timing_valid = match (response.duration_seconds, response.remaining_seconds) {
+        (Some(duration), Some(remaining)) => {
+            (api::MINIMUM_COMMISSIONING_WINDOW_SECONDS..=api::MAXIMUM_COMMISSIONING_WINDOW_SECONDS)
+                .contains(&duration)
+                && (1..=duration).contains(&remaining)
+        }
+        (None, None) => true,
+        _ => false,
+    };
+    let payload_valid = match (&response.manual_code, &response.qr_code) {
+        (Some(manual_code), Some(qr_code)) => valid_pairing_payload(manual_code, qr_code),
+        (None, None) => true,
+        _ => false,
+    };
+    let has_timing = response.duration_seconds.is_some() || response.remaining_seconds.is_some();
+    let has_payload = response.manual_code.is_some() || response.qr_code.is_some();
+    let details_are_complete = has_timing == has_payload;
+    let closed_has_details = !response.open
+        && (response.duration_seconds.is_some()
+            || response.remaining_seconds.is_some()
+            || response.manual_code.is_some()
+            || response.qr_code.is_some());
+    if !timing_valid || !payload_valid || !details_are_complete || closed_has_details {
+        return Err(InstanceError::Operation(
+            "adapter returned invalid commissioning status".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn valid_pairing_payload(manual_code: &str, qr_code: &str) -> bool {
+    matches!(manual_code.len(), 11 | 21)
+        && manual_code.bytes().all(|byte| byte.is_ascii_digit())
+        && qr_code.starts_with("MT:")
+        && (4..=512).contains(&qr_code.len())
+        && qr_code == qr_code.trim()
 }
 
 pub struct Inventory {

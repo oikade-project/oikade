@@ -17,6 +17,7 @@ pub const METHOD_SYNC: &str = "sync";
 pub const METHOD_EVENT: &str = "event";
 pub const METHOD_COMMAND: &str = "command";
 pub const METHOD_HEALTH: &str = "health";
+pub const METHOD_COMMISSIONING_INFO: &str = "commissioning_info";
 pub const METHOD_OPEN_COMMISSIONING_WINDOW: &str = "open_commissioning_window";
 pub const METHOD_REMOVE_RESOURCE: &str = "remove_resource";
 pub const METHOD_SHUTDOWN: &str = "shutdown";
@@ -255,8 +256,26 @@ pub struct OpenCommissioningWindowRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenCommissioningWindowResponse {
     pub duration_seconds: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remaining_seconds: Option<u16>,
     pub manual_code: String,
     pub qr_code: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommissioningInfoRequest {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommissioningInfoResponse {
+    pub open: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_seconds: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remaining_seconds: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manual_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qr_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -298,5 +317,18 @@ mod tests {
         let empty: SyncResponse =
             serde_json::from_str(r#"{"generation":1,"devices":0,"projections":[]}"#).unwrap();
         assert_eq!(empty.projections, Some(Vec::new()));
+    }
+
+    #[test]
+    fn commissioning_info_omits_closed_window_details() {
+        let info = CommissioningInfoResponse {
+            open: false,
+            duration_seconds: None,
+            remaining_seconds: None,
+            manual_code: None,
+            qr_code: None,
+        };
+
+        assert_eq!(serde_json::to_string(&info).unwrap(), r#"{"open":false}"#);
     }
 }

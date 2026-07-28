@@ -18,7 +18,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use bytes::Bytes;
-use oikade_adapter_host::Instance as AdapterInstance;
+use oikade_adapter_host::{Instance as AdapterInstance, InstanceError as AdapterInstanceError};
 use oikade_core::{CapabilityId, Command, DeviceId, Runtime, RuntimeError};
 use oikade_plugin_host::Instance as PluginInstance;
 use oikade_runtime::Component;
@@ -31,9 +31,9 @@ use tokio::{
 
 use crate::wire::{
     API_VERSION, Adapter, AdapterDiagnostic, AdapterResource, AdapterResourcesResponse,
-    AdaptersResponse, Capability, CommissioningRequest, CommissioningWindow, DevicesResponse,
-    ErrorPayload, Plugin, PluginsResponse, ResetRequest, Status, StreamRecord, WriteRequest,
-    capability_from_state, device_from_state, event_from_core, value_to_core,
+    AdaptersResponse, Capability, CommissioningInfo, CommissioningRequest, CommissioningWindow,
+    DevicesResponse, ErrorPayload, Plugin, PluginsResponse, ResetRequest, Status, StreamRecord,
+    WriteRequest, capability_from_state, device_from_state, event_from_core, value_to_core,
 };
 
 mod socket;
@@ -221,7 +221,7 @@ fn router(state: Arc<ServerState>) -> Router {
         .route("/v1/adapters/{instance}", get(get_adapter))
         .route(
             "/v1/adapters/{instance}/commissioning-window",
-            post(open_commissioning_window),
+            get(get_commissioning_info).post(open_commissioning_window),
         )
         .route("/v1/adapters/{instance}/reset", post(reset_adapter_state))
         .route(
@@ -335,9 +335,28 @@ async fn open_commissioning_window(
     let result = adapter
         .open_commissioning_window(Duration::from_secs(u64::from(request.duration_seconds)))
         .await
-        .map_err(|error| ApiFailure::gateway("adapter_error", error.to_string()))?;
+        .map_err(adapter_failure)?;
     Ok(Json(CommissioningWindow {
         duration_seconds: result.duration_seconds,
+        remaining_seconds: result.remaining_seconds,
+        manual_code: result.manual_code,
+        qr_code: result.qr_code,
+    }))
+}
+
+async fn get_commissioning_info(
+    State(state): State<Arc<ServerState>>,
+    AxumPath(instance): AxumPath<String>,
+) -> Result<Json<CommissioningInfo>, ApiFailure> {
+    let adapter = find_adapter(&state, &instance)?;
+    let result = adapter
+        .commissioning_info()
+        .await
+        .map_err(adapter_failure)?;
+    Ok(Json(CommissioningInfo {
+        open: result.open,
+        duration_seconds: result.duration_seconds,
+        remaining_seconds: result.remaining_seconds,
         manual_code: result.manual_code,
         qr_code: result.qr_code,
     }))
@@ -351,7 +370,7 @@ async fn remove_adapter_resource(
     let resources = adapter
         .remove_resource(resource_type, id)
         .await
-        .map_err(|error| ApiFailure::gateway("adapter_error", error.to_string()))?;
+        .map_err(adapter_failure)?;
     Ok(Json(AdapterResourcesResponse {
         resources: resources
             .into_iter()
@@ -378,10 +397,7 @@ async fn reset_adapter_state(
         ));
     }
     let adapter = find_adapter(&state, &instance)?;
-    adapter
-        .reset_state()
-        .await
-        .map_err(|error| ApiFailure::gateway("adapter_error", error.to_string()))?;
+    adapter.reset_state().await.map_err(adapter_failure)?;
     Ok(Json(crate::wire::AdapterReset {
         instance_id: instance,
         state: "running".to_owned(),
@@ -568,6 +584,14 @@ fn find_adapter(state: &ServerState, instance: &str) -> Result<Arc<AdapterInstan
         .find(|adapter| adapter.instance_id() == instance)
         .cloned()
         .ok_or_else(not_found)
+}
+
+fn adapter_failure(error: AdapterInstanceError) -> ApiFailure {
+    if let Some((code, message)) = error.protocol_error() {
+        ApiFailure::gateway(code, message)
+    } else {
+        ApiFailure::gateway("adapter_error", "adapter operation failed")
+    }
 }
 
 #[derive(Debug)]

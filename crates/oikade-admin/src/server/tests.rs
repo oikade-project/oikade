@@ -6,7 +6,7 @@ use oikade_core::{
 };
 
 use super::*;
-use crate::{Client, Value};
+use crate::{ApiError, Client, ClientError, Value};
 
 #[tokio::test]
 async fn local_api_reads_writes_and_removes_its_private_socket() {
@@ -50,6 +50,14 @@ async fn local_api_reads_writes_and_removes_its_private_socket() {
     let client = Client::new(&socket).unwrap();
     assert_eq!(client.status().await.unwrap().devices, 1);
     assert_eq!(client.devices().await.unwrap()[0].id, "test.switch");
+    let commissioning_error = client.commissioning_info("missing").await.unwrap_err();
+    assert!(matches!(
+        commissioning_error,
+        ClientError::Api(ApiError {
+            status: StatusCode::NOT_FOUND,
+            ..
+        })
+    ));
     let malformed = reqwest::Client::builder()
         .unix_socket(socket.clone())
         .build()
@@ -92,4 +100,42 @@ async fn local_api_reads_writes_and_removes_its_private_socket() {
     server.stop().await.unwrap();
     assert!(!socket.exists());
     runtime.stop().await;
+}
+
+#[test]
+fn adapter_protocol_errors_keep_only_allowlisted_code_and_fixed_message() {
+    let failure = adapter_failure(AdapterInstanceError::AdapterProtocol {
+        code: "window_closing".to_owned(),
+        message: "setup passcode is 12345678".to_owned(),
+    });
+
+    assert_eq!(failure.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(failure.payload.code, "window_closing");
+    assert_eq!(
+        failure.payload.message,
+        "the previous commissioning window is still closing"
+    );
+}
+
+#[test]
+fn unknown_adapter_protocol_errors_use_a_safe_generic_fallback() {
+    let failure = adapter_failure(AdapterInstanceError::AdapterProtocol {
+        code: "internal_error".to_owned(),
+        message: "setup passcode is 12345678".to_owned(),
+    });
+
+    assert_eq!(failure.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(failure.payload.code, "adapter_error");
+    assert_eq!(failure.payload.message, "adapter operation failed");
+}
+
+#[test]
+fn non_protocol_adapter_errors_use_a_safe_generic_fallback() {
+    let failure = adapter_failure(AdapterInstanceError::Operation(
+        "internal detail that must not cross the admin boundary".to_owned(),
+    ));
+
+    assert_eq!(failure.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(failure.payload.code, "adapter_error");
+    assert_eq!(failure.payload.message, "adapter operation failed");
 }

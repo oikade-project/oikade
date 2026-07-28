@@ -43,5 +43,8 @@ serde.workspace = true
 serde_json.workspace = true
 socket2.workspace = true
 
+[dev-dependencies]
+tempfile = "3"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 rs-matter = { version = "=0.2.0", features = ["astro-dnssd"] }

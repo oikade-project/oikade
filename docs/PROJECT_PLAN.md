@@ -130,8 +130,9 @@ Implemented:
 - Dedicated typed adapter RPC with full topology sync, acknowledged events,
   controller command routing, health and graceful shutdown.
 - Private Matter state, stable endpoint mappings and restart recovery.
-- Explicit setup passcode/discriminator validation and bounded commissioning
-  window controls.
+- Explicit setup passcode/discriminator validation, automatic one-time-per-process-start
+  15-minute commissioning for zero-fabric state, explicit status and onboarding
+  retrieval, and explicit window reopening controls.
 - Fabric inventory and fail-closed local single-fabric removal.
 - Explicit full Matter reset through marked private-state rotation.
 - Switch, dimmable light, outlet, temperature, humidity, contact and occupancy

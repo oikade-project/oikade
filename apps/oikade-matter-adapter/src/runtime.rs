@@ -22,8 +22,6 @@ use rs_matter::dm::networks::eth::EthNetwork;
 use rs_matter::dm::{Async, AttrChangeNotifier, DataModel, Dataver, EpClMatcher};
 use rs_matter::error::{Error, ErrorCode};
 use rs_matter::im::{EthInteractionModelState, InteractionModel};
-use rs_matter::pairing::DiscoveryCapabilities;
-use rs_matter::pairing::qr::{CommFlowType, QrPayload};
 use rs_matter::persist::DirKvBlobStore;
 use rs_matter::respond::DefaultResponder;
 use rs_matter::sc::pase::{Spake2pVerifierPassword, Spake2pVerifierPasswordRef};
@@ -36,6 +34,7 @@ use crate::bridge::{
     AGGREGATOR_ENDPOINT, BridgeState, BridgedHandler, ContactHandler, HumidityHandler,
     LevelHandler, OccupancyHandler, OnOffHandler, TemperatureHandler,
 };
+use crate::commissioning::{AUTOMATIC_WINDOW_SECONDS, Commissioning, should_open_automatically};
 use crate::options::Options;
 use crate::rpc::{RpcFailure, RuntimeRequest};
 use crate::{mdns, rpc, wire};
@@ -84,6 +83,9 @@ pub(crate) async fn run(options: Options) -> Result<(), Error> {
     let data_model = data_model(random, &bridge);
     let im = InteractionModel::new(&matter, &crypto, &buffers, data_model, &kv, &im_state);
     let responder = DefaultResponder::new(&im);
+    let socket = async_io::Async::<UdpSocket>::bind(MATTER_SOCKET_BIND_ADDR)?;
+    log::info!("Matter transport started");
+    let automatic_commissioning = should_open_automatically(fabric_count(&matter));
 
     let wire = wire::Wire::from_fd(options.rpc_fd).map_err(|_| ErrorCode::StdIoError)?;
     let (runtime_tx, runtime_rx) = async_channel::bounded(64);
@@ -98,13 +100,13 @@ pub(crate) async fn run(options: Options) -> Result<(), Error> {
         &matter,
         &crypto,
         &im,
+        Commissioning::default(),
+        automatic_commissioning,
         || im.bump_configuration_version().map(|_| ()),
         runtime_rx,
     ));
     let responder = pin!(responder.run::<8, 8>());
     let im_job = pin!(im.run());
-    let socket = async_io::Async::<UdpSocket>::bind(MATTER_SOCKET_BIND_ADDR)?;
-    log::info!("Matter transport started");
     let transport = pin!(matter.run(&crypto, &socket, &socket, &socket));
     let mdns = pin!(async {
         if let Err(error) = mdns::run(&matter, &crypto).await {
@@ -199,9 +201,24 @@ async fn run_control(
     matter: &Matter<'_>,
     crypto: impl Crypto,
     im: &impl AttrChangeNotifier,
+    mut commissioning: Commissioning,
+    automatic_commissioning: bool,
     bump_configuration_version: impl Fn() -> Result<(), Error>,
     requests: async_channel::Receiver<RuntimeRequest>,
 ) -> Result<(), Error> {
+    if automatic_commissioning {
+        commissioning
+            .open(matter, &crypto, im, AUTOMATIC_WINDOW_SECONDS)
+            .map_err(|error| {
+                log::error!("open automatic commissioning window: {error:?}");
+                ErrorCode::InvalidState
+            })?;
+        log::info!("automatic commissioning window opened for {AUTOMATIC_WINDOW_SECONDS}s");
+        log::warn!(
+            "rs-matter 0.2.0 does not report when the first mDNS advertisement is published"
+        );
+    }
+
     while let Ok(request) = requests.recv().await {
         match request {
             RuntimeRequest::TopologyChanged => {
@@ -227,10 +244,15 @@ async fn run_control(
                 duration_seconds,
                 response,
             } => {
-                let result = open_commissioning_window(matter, &crypto, im, duration_seconds);
+                let result = commissioning.open(matter, &crypto, im, duration_seconds);
                 if result.is_ok() {
-                    log::info!("commissioning window opened for {duration_seconds}s");
+                    log::info!("commissioning window available");
                 }
+                let result = result.and_then(json_response);
+                let _ = response.send(result).await;
+            }
+            RuntimeRequest::CommissioningInfo { response } => {
+                let result = commissioning.info(matter).and_then(json_response);
                 let _ = response.send(result).await;
             }
             RuntimeRequest::RemoveResource {
@@ -283,30 +305,11 @@ fn fabric_resources(matter: &Matter<'_>) -> Vec<Value> {
     })
 }
 
-fn open_commissioning_window(
-    matter: &Matter<'_>,
-    crypto: impl Crypto,
-    notify: &impl AttrChangeNotifier,
-    duration_seconds: u16,
-) -> Result<Value, RpcFailure> {
-    matter
-        .open_basic_comm_window(duration_seconds, crypto, notify)
-        .map_err(|error| RpcFailure::new("open_failed", error.to_string()))?;
-    let manual_code = matter.dev_comm().compute_pairing_code().to_string();
-    let payload = QrPayload::new_from_basic_info(
-        DiscoveryCapabilities::IP,
-        CommFlowType::Standard,
-        matter.dev_comm().clone(),
-        matter.dev_det(),
-        core::iter::empty,
-    );
-    let mut buffer = [0_u8; 256];
-    let (qr_code, _) = payload
-        .as_str(&mut buffer)
-        .map_err(|error| RpcFailure::new("payload_failed", error.to_string()))?;
-    Ok(json!({
-        "duration_seconds": duration_seconds,
-        "manual_code": manual_code,
-        "qr_code": qr_code,
-    }))
+fn fabric_count(matter: &Matter<'_>) -> usize {
+    matter.with_state(|state| state.fabrics.iter().count())
+}
+
+fn json_response(response: impl serde::Serialize) -> Result<Value, RpcFailure> {
+    serde_json::to_value(response)
+        .map_err(|error| RpcFailure::new("encode_failed", error.to_string()))
 }

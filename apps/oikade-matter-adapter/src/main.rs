@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 mod bridge;
+mod commissioning;
 mod logging;
 mod mdns;
 mod options;

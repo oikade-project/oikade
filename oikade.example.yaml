@@ -32,14 +32,16 @@ integrations:
 # experimental and disabled unless explicitly configured. Native packages
 # bundle the compatible binary; `executable` is an optional development or
 # package-maintainer override and is never discovered through PATH.
-# adapters:
-#   matter:
-#     enabled: true
-#     # executable: ./bin/oikade-matter-adapter
-#     # Supported values: none, error, info, debug.
-#     log_level: error
-#     commissioning:
-#       # Required eight-digit string. Choose a unique value and keep it secret.
-#       setup_passcode: "02022021"
-#       # Required long discriminator, from 0 through 4095.
-#       discriminator: 3840
+adapters:
+  matter:
+    enabled: true
+    executable: ./target/debug/oikade-matter-adapter
+    # Supported values: none, error, info, debug.
+    log_level: info
+    commissioning:
+      # Required eight-digit string. Choose a unique value and keep it secret.
+      # Fresh state opens one 15-minute window; inspect it with
+      # `oikade adapters commissioning-info matter`.
+      setup_passcode: "22345678"
+      # Required long discriminator, from 0 through 4095.
+      discriminator: 3840
