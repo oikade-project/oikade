@@ -1,0 +1,23 @@
+# Build output
+/target/
+
+# Test and profiling output
+/coverage.out
+/performance-results/
+*.prof
+
+# Python tooling artifacts
+__pycache__/
+*.py[cod]
+
+# Local runtime state
+*.db
+*.db-shm
+*.db-wal
+*.redb
+runtime-state.json
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/

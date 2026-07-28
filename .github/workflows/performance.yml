@@ -1,0 +1,38 @@
+name: ARM64 performance
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: Informational Linux ARM64 measurements
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal
+
+      - name: Measure
+        env:
+          OIKADE_PERF_RUNS: "3"
+          OIKADE_PERF_WARMUP: 3s
+          OIKADE_PERF_IDLE_DURATION: 30s
+        run: rustup run 1.89.0 ./scripts/perf.sh performance-results/ci-arm64
+
+      - name: Upload raw measurements
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: oikade-performance-linux-arm64
+          path: performance-results/ci-arm64
+          if-no-files-found: error
+          retention-days: 30

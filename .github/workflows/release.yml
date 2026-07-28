@@ -1,0 +1,165 @@
+name: Release native packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-24.04
+            os: linux
+            arch: amd64
+          - name: Linux ARM64
+            runner: ubuntu-24.04-arm
+            os: linux
+            arch: arm64
+          - name: macOS ARM64
+            runner: macos-15
+            os: darwin
+            arch: arm64
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal --component rustfmt,clippy
+
+      - name: Check source and packaging contracts
+        run: rustup run 1.89.0 ./scripts/check.sh
+
+      - name: Resolve release identity
+        id: release
+        shell: bash
+        run: |
+          version="$(cargo metadata --locked --no-deps --format-version 1 | \
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "invalid release version: $version" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "tag $GITHUB_REF_NAME does not match workspace version $version" >&2
+            exit 1
+          fi
+          built_at="$(git show -s --format=%cI "$GITHUB_SHA")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "built_at=$built_at" >> "$GITHUB_OUTPUT"
+
+      - name: Build Oikade and Matter sidecar
+        env:
+          OIKADE_BUILD_VERSION: ${{ steps.release.outputs.version }}
+          OIKADE_BUILD_COMMIT: ${{ github.sha }}
+          OIKADE_BUILD_DATE: ${{ steps.release.outputs.built_at }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/oikade-build"
+          rustup run 1.89.0 cargo build --locked --release \
+            -p oikade -p oikade-matter-adapter
+          cp target/release/oikade "$RUNNER_TEMP/oikade-build/oikade"
+          cp target/release/oikade-matter-adapter \
+            "$RUNNER_TEMP/oikade-build/oikade-matter-adapter"
+          strip "$RUNNER_TEMP/oikade-build/oikade"
+          strip "$RUNNER_TEMP/oikade-build/oikade-matter-adapter"
+
+      - name: Assemble native package
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          BUILT_AT: ${{ steps.release.outputs.built_at }}
+        shell: bash
+        run: |
+          ./scripts/package-native.sh \
+            --binary "$RUNNER_TEMP/oikade-build/oikade" \
+            --adapter-binary "$RUNNER_TEMP/oikade-build/oikade-matter-adapter" \
+            --version "$RELEASE_VERSION" \
+            --commit "$GITHUB_SHA" \
+            --built-at "$BUILT_AT" \
+            --os "${{ matrix.os }}" \
+            --arch "${{ matrix.arch }}" \
+            --output "$RUNNER_TEMP/packages"
+
+      - name: Attest native package provenance
+        if: github.ref_type == 'tag'
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-path: ${{ runner.temp }}/packages/*.tar.gz
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: oikade-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/packages/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish verified GitHub Release
+    if: github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download native packages
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: oikade-*
+          path: ${{ runner.temp }}/release-assets
+          merge-multiple: true
+
+      - name: Verify package set and assemble manifest
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          ./scripts/assemble-native-release.sh \
+            --input "$RUNNER_TEMP/release-assets" \
+            --output "$RUNNER_TEMP/release-assets/SHA256SUMS" \
+            --version "$version" \
+            --commit "$GITHUB_SHA"
+
+      - name: Attest consolidated checksum manifest
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4
+        with:
+          subject-path: ${{ runner.temp }}/release-assets/SHA256SUMS
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          release_options=()
+          version="${GITHUB_REF_NAME#v}"
+          if [[ "$version" == *-* ]]; then
+            release_options+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            "$RUNNER_TEMP"/release-assets/* \
+            --verify-tag \
+            --title "Oikade $version" \
+            --generate-notes \
+            "${release_options[@]}"

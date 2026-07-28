@@ -1,0 +1,45 @@
+# Oikade configuration schema version.
+version: 1
+
+runtime:
+  # Supported values: debug, info, warn, error.
+  log_level: info
+
+  # Optional. Defaults to the platform user configuration directory.
+  # state_dir: /var/lib/oikade
+
+  # Optional. Defaults to oikade.sock inside state_dir.
+  # admin_socket: /run/oikade/oikade.sock
+
+# Built-in deterministic devices exercise the protocol-neutral runtime without
+# requiring hardware or a protocol adapter.
+integrations:
+  virtual:
+    switches:
+      - id: example-switch
+        name: Oikade Example Switch
+        initial_on: false
+
+# Rust plugins are local executable artifacts. Relative paths are resolved from
+# this file. See docs/PLUGIN_API.md for the manifest and lifecycle contract.
+# plugins:
+#   - id: garden-weather
+#     artifact: ./plugins/example-weather
+#     config:
+#       address: 192.0.2.10
+
+# External protocol adapters consume the canonical device model. Matter is
+# experimental and disabled unless explicitly configured. Native packages
+# bundle the compatible binary; `executable` is an optional development or
+# package-maintainer override and is never discovered through PATH.
+# adapters:
+#   matter:
+#     enabled: true
+#     # executable: ./bin/oikade-matter-adapter
+#     # Supported values: none, error, info, debug.
+#     log_level: error
+#     commissioning:
+#       # Required eight-digit string. Choose a unique value and keep it secret.
+#       setup_passcode: "02022021"
+#       # Required long discriminator, from 0 through 4095.
+#       discriminator: 3840

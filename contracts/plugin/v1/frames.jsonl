@@ -1,0 +1,12 @@
+{"version":1,"method":"hello","body":{"plugin_id":"example.plugin","plugin_version":"0.1.0","min_api_version":1,"max_api_version":1}}
+{"version":1,"id":1,"method":"initialize","body":{"api_version":1,"instance_id":"demo","config":{"address":"192.0.2.1"}}}
+{"version":1,"id":1,"method":"initialize","body":{"devices":[{"id":"switch","name":"Switch","manufacturer":"Oikade","model":"Fixture","capabilities":[{"id":"on","type":"oikade.switch.on","name":"On","kind":"bool","permissions":{"read":true,"write":true,"observe":true},"initial_value":{"kind":"bool","bool":true}}]}]}}
+{"version":1,"id":2,"method":"command","body":{"device_id":"switch","capability_id":"on","value":{"kind":"bool","bool":true}}}
+{"version":1,"id":2,"method":"command","body":{"value":{"kind":"bool","bool":true}}}
+{"version":1,"method":"event","body":{"device_id":"switch","capability_id":"on","value":{"kind":"bool","bool":true}}}
+{"version":1,"method":"reconcile","body":{"devices":[{"id":"switch","name":"Switch","manufacturer":"Oikade","model":"Fixture","capabilities":[{"id":"on","type":"oikade.switch.on","name":"On","kind":"bool","permissions":{"read":true,"write":true,"observe":true},"initial_value":{"kind":"bool","bool":true}}]}]}}
+{"version":1,"id":3,"method":"health","body":{}}
+{"version":1,"id":3,"method":"health","body":{"healthy":false,"detail":"offline"}}
+{"version":1,"id":4,"method":"cancel","body":{"request_id":2}}
+{"version":1,"id":4,"method":"cancel","body":{}}
+{"version":1,"id":5,"method":"command","error":{"code":"command_failed","message":"offline"}}

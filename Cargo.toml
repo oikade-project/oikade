@@ -1,0 +1,92 @@
+[workspace]
+resolver = "3"
+members = [
+    "apps/oikade",
+    "apps/oikade-matter-adapter",
+    "crates/oikade-adapter-api",
+    "crates/oikade-adapter-host",
+    "crates/oikade-admin",
+    "crates/oikade-core",
+    "crates/oikade-config",
+    "crates/oikade-plugin-api",
+    "crates/oikade-plugin-host",
+    "crates/oikade-runtime",
+    "crates/oikade-storage",
+    "crates/oikade-supervisor",
+]
+default-members = ["apps/oikade", "apps/oikade-matter-adapter"]
+
+[workspace.package]
+version = "0.1.0-dev"
+edition = "2024"
+rust-version = "1.89"
+license = "Apache-2.0"
+repository = "https://github.com/oikade-project/oikade"
+
+[workspace.dependencies]
+anyhow = "1"
+async-channel = "2.5"
+async-io = "2.6"
+async-trait = "0.1"
+async-stream = "0.3"
+axum = "0.8.9"
+bytes = "1"
+command-fds = { version = "0.3.3", features = ["tokio"] }
+embassy-futures = "0.1.2"
+embassy-time = { version = "0.5", features = ["std"] }
+embassy-time-queue-utils = { version = "0.3", features = ["generic-queue-64"] }
+futures-lite = "2.6"
+futures-util = "0.3"
+if-addrs = "0.15"
+libc = "0.2"
+log = { version = "0.4", features = ["std"] }
+nix = { version = "0.31.3", features = ["process", "signal"] }
+percent-encoding = "2"
+rand = { version = "0.8", features = ["std", "std_rng"] }
+redb = "=4.1.0"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "stream"] }
+saphyr-parser = "=0.0.11"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+socket2 = { version = "0.5", features = ["all"] }
+thiserror = "2"
+time = { version = "0.3", features = ["formatting"] }
+tokio = { version = "1", features = [
+    "macros",
+    "net",
+    "io-util",
+    "process",
+    "rt-multi-thread",
+    "signal",
+    "sync",
+    "time",
+] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+oikade-adapter-api = { path = "crates/oikade-adapter-api" }
+oikade-adapter-host = { path = "crates/oikade-adapter-host" }
+oikade-admin = { path = "crates/oikade-admin" }
+oikade-core = { path = "crates/oikade-core" }
+oikade-config = { path = "crates/oikade-config" }
+oikade-plugin-api = { path = "crates/oikade-plugin-api" }
+oikade-plugin-host = { path = "crates/oikade-plugin-host" }
+oikade-runtime = { path = "crates/oikade-runtime" }
+oikade-storage = { path = "crates/oikade-storage" }
+oikade-supervisor = { path = "crates/oikade-supervisor" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+expect_used = "warn"
+unwrap_used = "warn"
+
+[profile.release]
+codegen-units = 1
+debug = 0
+incremental = false
+lto = "fat"
+opt-level = "z"
+overflow-checks = true
+strip = true

@@ -1,0 +1,9 @@
+Oikade
+Copyright 2026 The Oikade Authors
+
+The bundled Matter sidecar includes rs-matter and a portable mDNS transport
+adapted from its bridge example, licensed under the Apache License, Version 2.0.
+
+rs-matter
+Copyright Project CHIP Authors and contributors
+https://github.com/project-chip/rs-matter

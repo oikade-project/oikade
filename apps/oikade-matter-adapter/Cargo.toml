@@ -1,0 +1,47 @@
+[package]
+name = "oikade-matter-adapter"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "oikade-matter-adapter"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+expect_used = "warn"
+unwrap_used = "warn"
+
+[dependencies]
+async-channel.workspace = true
+async-io.workspace = true
+embassy-futures.workspace = true
+embassy-time.workspace = true
+embassy-time-queue-utils.workspace = true
+futures-lite.workspace = true
+if-addrs.workspace = true
+libc.workspace = true
+log.workspace = true
+oikade-adapter-api.workspace = true
+rand.workspace = true
+rs-matter = { version = "=0.2.0", features = [
+    "async-io",
+    "kv-blob-store-16384",
+    "max-fabrics-8",
+    "max-group-endpoints-per-fabric-5",
+    "max-group-keys-per-fabric-2",
+    "max-groups-per-fabric-12",
+    "max-sessions-32",
+] }
+serde.workspace = true
+serde_json.workspace = true
+socket2.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+rs-matter = { version = "=0.2.0", features = ["astro-dnssd"] }

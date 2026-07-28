@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust-check:
+    name: Rust ${{ matrix.rust-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust-version:
+          - 1.89.0
+          - stable
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "${{ matrix.rust-version }}" --profile minimal --component rustfmt,clippy
+
+      - name: Check
+        run: rustup run "${{ matrix.rust-version }}" ./scripts/check.sh
+
+  matter-macos-check:
+    name: Matter sidecar macOS ARM64
+    runs-on: macos-15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.89.0 --profile minimal --component rustfmt,clippy
+
+      - name: Test native Matter sidecar
+        run: |
+          rustup run 1.89.0 cargo test --locked -p oikade-matter-adapter --all-targets
+          rustup run 1.89.0 cargo clippy --locked -p oikade-matter-adapter \
+            --all-targets --all-features -- -D warnings
+          rustup run 1.89.0 cargo build --locked -p oikade-matter-adapter
+          python3 apps/oikade-matter-adapter/tests/rpc_integration.py \
+            --binary target/debug/oikade-matter-adapter
